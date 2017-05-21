@@ -12,35 +12,87 @@ import (
 )
 
 type Session interface {
-	Cmd(cmd string) (reply string, err error)
+	Cmd(cmd string, timeout time.Duration) (reply string, err error)
+	Close()
 }
 
 type SshSession struct {
-	in  chan<- string
-	out <-chan string
+	runFlag	chan bool
+	in         chan<- string
+	Stderr        <-chan string
+	buf        [65 * 1024]byte
+	hostname   string
+	moreString string
+	consoleIn io.Writer
+	consoleOut io.Reader
+	consoleErr io.Reader
+	golangSession *ssh.Session
 }
 
-func (s *SshSession) Cmd(cmd string) (reply string, err error) {
-	err=nil
+func (s *SshSession) Cmd(cmd string, timeout time.Duration) (reply string, err error) {
 	select {
-	case s.in<-cmd:
+	case s.runFlag<-true:
+		defer func(){<-s.runFlag}()
 	default:
-		return "",fmt.Errorf("console isn't ready")
+		return "", fmt.Errorf("console isn't ready")
 	}
-	s.in<-cmd
-	timer:=time.NewTimer(time.Second)
+	err = nil
+	s.consoleIn.Write([]byte(cmd + "\n"))
+	return s.readReply(timeout)
+}
+func (s *SshSession) readReply(timeout time.Duration) (reply string, err error) {
+	var (
+		t   int   = 0
+	)
+	err = nil
+	finish := make(chan bool)
+
+	go func() {
+		var n int
+		for {
+			n, err = s.consoleOut.Read(s.buf[t:])
+			if err != nil {
+				if err == io.EOF {
+					// 测试此处
+					reply = string(s.buf[:t])
+					finish <- true
+					return
+				}
+				err = fmt.Errorf("read error:", err.Error())
+				finish <- false
+				return
+			}
+			t += n
+			reply = string(s.buf[:t])
+			if strings.Contains(reply, s.moreString) {
+				// 处理一屏幕显示不完情况，需要输入空格
+				s.consoleIn.Write([]byte(" "))
+			}
+		}
+	}()
 	select {
-	case  reply= <-s.out:
-		return
-	case <-timer.C:
-		return "",fmt.Errorf("read Timeout")
+	case <-finish:
+		return reply,err
+	case <-time.After(timeout):
+		return reply,fmt.Errorf("read reply timeout")
 	}
+}
+func (s *SshSession) IOHandle(w io.Writer, r, e io.Reader) {
+	go func() {
+		//todo output stderr
+	}()
+	s.consoleIn=w
+	s.consoleOut=r
+	s.consoleErr=e
+}
+func (s *SshSession)Close()  {
+	s.golangSession.Close()
 }
 func saveHostPublicKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
 	fmt.Printf("publicKey:\n%x\n", key.Marshal())
 	return nil
 }
-func (s *SshSession) Dial(addr, username, password string) error {
+func SshDial(addr, username, password string, moreStr string) (Session, error) {
 	// An SSH client is represented with a ClientConn.
 	//
 	// To authenticate with the remote server you must pass at least one
@@ -55,16 +107,15 @@ func (s *SshSession) Dial(addr, username, password string) error {
 	}
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
-		return fmt.Errorf("Failed to dial: ", err)
+		return nil, fmt.Errorf("Failed to dial: ", err)
 	}
 
 	// Each ClientConn can support multiple interactive sessions,
 	// represented by a Session.
 	session, err := client.NewSession()
 	if err != nil {
-		return fmt.Errorf("Failed to create session: ", err)
+		return nil, fmt.Errorf("Failed to create session: ", err)
 	}
-	defer session.Close()
 
 	// Set up terminal modes
 	modes := ssh.TerminalModes{
@@ -74,38 +125,31 @@ func (s *SshSession) Dial(addr, username, password string) error {
 	}
 	// Request pseudo terminal
 	if err := session.RequestPty("vt100", 40, 80, modes); err != nil {
-		return fmt.Errorf("request for pseudo terminal failed: ", err)
+		return nil, fmt.Errorf("request for pseudo terminal failed: ", err)
 	}
 
 	w, err := session.StdinPipe()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	r, err := session.StdoutPipe()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	e, err := session.StderrPipe()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	s.in, s.out = MuxShell(w, r, e)
+	sshSession := new(SshSession)
+	sshSession.moreString = moreStr
+	sshSession.golangSession=session
+	sshSession.IOHandle(w, r, e)
 	if err := session.Shell(); err != nil {
 		log.Fatal(err)
 	}
-	<-s.out //ignore the shell output
-	go func() {
-		for {
-			select {
-			case s := <-s.out:
-				fmt.Printf("%s", s)
-			}
-		}
-	}()
-
-	session.Wait()
-	return nil
+	go session.Wait()
+	return sshSession,nil
 }
 func MuxShell(w io.Writer, r, e io.Reader) (chan<- string, <-chan string) {
 	in := make(chan string, 1)
@@ -154,4 +198,3 @@ func MuxShell(w io.Writer, r, e io.Reader) (chan<- string, <-chan string) {
 	}()
 	return in, out
 }
-
