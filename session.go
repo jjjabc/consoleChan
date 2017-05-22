@@ -1,51 +1,158 @@
 package consoleChan
 
 import (
+	"errors"
 	"fmt"
-	"strings"
-	"io"
-	"sync"
 	"golang.org/x/crypto/ssh"
+	"io"
 	"log"
 	"net"
+	"strings"
+	"sync"
 	"time"
 )
 
+var (
+	ErrNeedPassword = errors.New("Need to input password")
+)
+
+const (
+	PromptStd = iota
+	PromptEnable
+	PromptPassword
+)
+
+type PromptType int
 type Session interface {
+	SetHostname(hostname string)
 	Cmd(cmd string, timeout time.Duration) (reply string, err error)
+	Enable(password string) error
 	Close()
 }
 
 type SshSession struct {
-	runFlag	chan bool
-	in         chan<- string
-	Stderr        <-chan string
-	buf        [65 * 1024]byte
-	hostname   string
-	moreString string
-	consoleIn io.Writer
-	consoleOut io.Reader
-	consoleErr io.Reader
-	golangSession *ssh.Session
+	runFlag                                 chan bool
+	in                                      chan<- string
+	Stderr                                  <-chan string
+	buf                                     [65 * 1024]byte
+	hostname                                string
+	moreString                              string
+	consoleIn                               io.Writer
+	consoleOut                              io.Reader
+	consoleErr                              io.Reader
+	golangSession                           *ssh.Session
+	promptStd, promptEnable, promptPassword string
 }
 
+func newSshSession() *SshSession {
+	s := &SshSession{}
+	s.promptPassword = "password:"
+	s.runFlag = make(chan bool, 1)
+	return s
+}
+func (s *SshSession) SetHostname(hostname string) {
+	s.hostname = hostname
+	s.promptStd = s.hostname + ">"
+	s.promptEnable = s.hostname + "#"
+}
 func (s *SshSession) Cmd(cmd string, timeout time.Duration) (reply string, err error) {
 	select {
-	case s.runFlag<-true:
-		defer func(){<-s.runFlag}()
+	case s.runFlag <- true:
+		defer func() { <-s.runFlag }()
 	default:
 		return "", fmt.Errorf("console isn't ready")
 	}
 	err = nil
-	s.consoleIn.Write([]byte(cmd + "\n"))
-	return s.readReply(timeout)
+	pType, err := s.findPrompt()
+	if err != nil {
+		return
+	}
+	if pType == PromptPassword {
+		err = ErrNeedPassword
+		return
+	}
+	_, err = s.consoleIn.Write([]byte(cmd + "\n"))
+	if err != nil {
+		return
+	}
+	return s.readReply(timeout,true)
 }
-func (s *SshSession) readReply(timeout time.Duration) (reply string, err error) {
+func (s *SshSession) Enable(password string) error {
+	select {
+	case s.runFlag <- true:
+		defer func() { <-s.runFlag }()
+	default:
+		return fmt.Errorf("console isn't ready")
+	}
+	pType, err := s.findPrompt()
+	if err != nil {
+		return err
+	}
+	if pType == PromptEnable {
+		return nil
+	}
+	if pType == PromptStd {
+		s.consoleIn.Write([]byte("enable\n"))
+		reply, err := s.readReply(time.Second,false)
+		if err != nil &&err!=ErrNeedPassword{
+			log.Printf(reply)
+			return fmt.Errorf("Cann't find password pormpt:" + err.Error())
+		}
+		if len(reply) >= len(s.promptEnable) &&
+			strings.Compare(reply[len(reply)-len(s.promptEnable):], s.promptEnable) == 0 {
+			return nil
+		}
+		if len(reply) <= len(s.promptPassword) ||
+			strings.Compare(reply[len(reply)-len(s.promptPassword):], s.promptPassword) != 0 {
+			return fmt.Errorf("Cann't find password pormpt!" + reply)
+		}
+	}
+	_, err = s.consoleIn.Write([]byte(password+"\n"))
+	if err != nil {
+		return err
+	}
+	reply, err := s.readReply(time.Second,true)
+	if err != nil {
+		if err == ErrNeedPassword {
+			return fmt.Errorf("Wrong password")
+		}
+		return fmt.Errorf("Input password error:"+err.Error())
+	}
+	if !strings.Contains(reply, s.promptEnable) {
+		return fmt.Errorf("Enable :"+reply)
+	}
+	return nil
+}
+func (s *SshSession) findPrompt() (PromptType, error) {
+	reply, err := s.readReply(time.Second,false)
+	if err != nil {
+		s.consoleIn.Write([]byte("\n"))
+		reply, err = s.readReply(time.Second,false)
+		if err != nil {
+			return -1, fmt.Errorf("Finding prompt error:" + err.Error())
+		}
+	}
+	if len(reply) >= (len(s.promptStd)) {
+		if strings.Compare(reply[len(reply)-len(s.promptStd):], s.promptStd) == 0 {
+			return PromptStd, nil
+		} else if strings.Compare(reply[len(reply)-len(s.promptEnable):], s.promptEnable) == 0 {
+			return PromptEnable, nil
+		}
+	} else if len(reply) >= len(s.promptPassword) {
+		if strings.Compare(reply[len(reply)-len(s.promptPassword):], s.promptPassword) == 0 {
+			return PromptPassword, nil
+		}
+	}
+	replys := strings.SplitAfter(reply, "\n")
+	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\"", replys[len(replys)-1])
+}
+func (s *SshSession) readReply(timeout time.Duration,needPorpmt bool) (reply string, err error) {
 	var (
-		t   int   = 0
+		t, oldT int = 0, 0
 	)
 	err = nil
 	finish := make(chan bool)
+	renew := make(chan bool)
 
 	go func() {
 		var n int
@@ -53,46 +160,69 @@ func (s *SshSession) readReply(timeout time.Duration) (reply string, err error) 
 			n, err = s.consoleOut.Read(s.buf[t:])
 			if err != nil {
 				if err == io.EOF {
-					// 测试此处
-					reply = string(s.buf[:t])
-					finish <- true
+					reply = string(s.buf[:t+n])
+					finish <- false
 					return
 				}
 				err = fmt.Errorf("read error:", err.Error())
 				finish <- false
 				return
 			}
+			oldT = t
 			t += n
 			reply = string(s.buf[:t])
-			if strings.Contains(reply, s.moreString) {
+			renew <- true
+			if strings.Contains(string(s.buf[oldT:t]), s.promptEnable) ||
+				strings.Contains(string(s.buf[oldT:t]), s.promptStd) {
+				if needPorpmt{
+				// 准备提示符
+					s.consoleIn.Write([]byte("\n"))
+				}
+				finish <- true
+				return
+			} else if strings.Contains(reply, s.moreString) {
 				// 处理一屏幕显示不完情况，需要输入空格
 				s.consoleIn.Write([]byte(" "))
+			} else if strings.Contains(string(s.buf[oldT:t]), s.promptPassword) {
+				err = ErrNeedPassword
+				if needPorpmt{
+					// 准备提示符
+					s.consoleIn.Write([]byte("\n"))
+				}
+				finish <- false
+				return
 			}
 		}
 	}()
-	select {
-	case <-finish:
-		return reply,err
-	case <-time.After(timeout):
-		return reply,fmt.Errorf("read reply timeout")
+	for {
+		select {
+		case <-finish:
+			return
+		case <-renew:
+			continue
+		case <-time.After(timeout):
+			err = fmt.Errorf("read reply timeout")
+			return
+		}
 	}
+
 }
 func (s *SshSession) IOHandle(w io.Writer, r, e io.Reader) {
 	go func() {
 		//todo output stderr
 	}()
-	s.consoleIn=w
-	s.consoleOut=r
-	s.consoleErr=e
+	s.consoleIn = w
+	s.consoleOut = r
+	s.consoleErr = e
 }
-func (s *SshSession)Close()  {
+func (s *SshSession) Close() {
 	s.golangSession.Close()
 }
 func saveHostPublicKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
 	fmt.Printf("publicKey:\n%x\n", key.Marshal())
 	return nil
 }
-func SshDial(addr, username, password string, moreStr string) (Session, error) {
+func SshDial(addr, username, password string, moreStr string, timeout time.Duration) (Session, error) {
 	// An SSH client is represented with a ClientConn.
 	//
 	// To authenticate with the remote server you must pass at least one
@@ -104,6 +234,7 @@ func SshDial(addr, username, password string, moreStr string) (Session, error) {
 			ssh.Password(password),
 		},
 		HostKeyCallback: saveHostPublicKey,
+		Timeout:         timeout,
 	}
 	client, err := ssh.Dial("tcp", addr, config)
 	if err != nil {
@@ -141,15 +272,16 @@ func SshDial(addr, username, password string, moreStr string) (Session, error) {
 		return nil, err
 	}
 
-	sshSession := new(SshSession)
+	sshSession := newSshSession()
 	sshSession.moreString = moreStr
-	sshSession.golangSession=session
+	sshSession.golangSession = session
 	sshSession.IOHandle(w, r, e)
 	if err := session.Shell(); err != nil {
 		log.Fatal(err)
 	}
+
 	go session.Wait()
-	return sshSession,nil
+	return sshSession, nil
 }
 func MuxShell(w io.Writer, r, e io.Reader) (chan<- string, <-chan string) {
 	in := make(chan string, 1)
