@@ -7,12 +7,10 @@ import (
 	"log"
 	"strings"
 	"time"
-	"bytes"
 )
 
 var (
 	ErrNeedPassword = errors.New("Need to input password")
-	a               = 0
 )
 
 const (
@@ -30,8 +28,9 @@ type PromptType int
 type Session struct {
 	runFlag                                              chan bool
 	in                                                   chan<- string
+	out                                                  chan string
+	readErr                                              chan error
 	Stderr                                               <-chan string
-	buf                                                  []byte
 	hostname                                             string
 	moreString                                           string
 	consoleIn                                            io.Writer
@@ -39,13 +38,10 @@ type Session struct {
 	consoleErr                                           io.Reader
 	rawSession                                           io.Closer
 	promptStd, promptEnable, promptPassword, promptLogin string
-	b *bytes.Buffer
 }
 
 func newConsoleSession() *Session {
 	s := &Session{}
-	s.buf=make([]byte,1024*1024)
-	s.b=bytes.NewBuffer([]byte{})
 	s.promptLogin = "login:"
 	s.promptPassword = "password:"
 	s.runFlag = make(chan bool, 1)
@@ -123,9 +119,7 @@ func (s *Session) Enable(password string) error {
 		return fmt.Errorf("console isn't ready")
 	}
 	s.readReply(10*time.Millisecond, false)
-	a = 1
 	pType, err := s.findPrompt(true)
-	a = 0
 	if err != nil {
 		return err
 	}
@@ -170,9 +164,6 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 		s.consoleIn.Write([]byte("\n"))
 	}
 	reply, err := s.readReply(time.Second, false)
-	if a == 1 {
-		log.Printf(reply)
-	}
 	if err != nil {
 		return -1, fmt.Errorf("Finding prompt error:" + err.Error())
 	}
@@ -197,84 +188,37 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\"", replys[len(replys)-1])
 }
 func (s *Session) readReply(timeout time.Duration, needPorpmt bool) (reply string, err error) {
-	var (
-		t, oldT int = 0, 0
-	)
 	err = nil
-	finish := make(chan bool)
-	renew := make(chan bool)
-	if a == 1 {
-		log.Printf("%v", renew)
-	}
-	go func(renew chan bool) {
-		var n int
+	for {
+		lastPartOfReply := ""
+	readFor:
 		for {
-			n, err = s.b.Read(s.buf[t:])
-			if err != nil {
-				if err == io.EOF {
-					err=nil
-					reply = string(s.buf[:t+n])
-					finish <- false
-					return
+			select {
+			case s := <-s.out:
+				lastPartOfReply = lastPartOfReply + s
+			case err = <-s.readErr:
+				select {
+				case s := <-s.out:
+					reply=reply+s
+				default:
 				}
-				err = fmt.Errorf("read error:", err.Error())
-				finish <- false
 				return
-			}
-			oldT = t
-			t += n
-			reply = string(s.buf[:t])
-			if a == 1 {
-				log.Printf("%v", strings.Contains(string(s.buf[oldT:t]), s.promptEnable) || strings.Contains(string(s.buf[oldT:t]), s.promptStd))
-			}
-
-			renew <- true
-			if a == 1 {
-				log.Printf("0000")
-			}
-
-			if strings.Contains(string(s.buf[oldT:t]), s.promptEnable) ||
-				strings.Contains(string(s.buf[oldT:t]), s.promptStd) {
-
-				if needPorpmt {
-					// 准备提示符
-					//s.consoleIn.Write([]byte("\n"))
-				}
-				if a == 1 {
-					log.Printf("1111")
-				}
-
-				finish <- true
+			case <-time.After(timeout):
+				//err = fmt.Errorf("read reply timeout")
 				return
-			} else if strings.Contains(reply, s.moreString) {
-				// 处理一屏幕显示不完情况，需要输入空格
-				s.consoleIn.Write([]byte(" "))
-			} else if strings.Contains(string(s.buf[oldT:t]), s.promptPassword) {
-				//err = ErrNeedPassword
-				if needPorpmt {
-					// 准备提示符
-					//s.consoleIn.Write([]byte("\n"))
-				}
-				finish <- false
-				return
-			} else if strings.Contains(string(s.buf[oldT:t]), s.promptLogin) {
-				finish <- false
-				return
+			default:
+				break readFor
 			}
 		}
-	}(renew)
-	for {
-		select {
-		case <-finish:
+		reply = reply + lastPartOfReply
+		if strings.Contains(lastPartOfReply, s.promptEnable) ||
+			strings.Contains(lastPartOfReply, s.promptStd) ||
+			strings.Contains(lastPartOfReply, s.promptPassword) ||
+			strings.Contains(lastPartOfReply, s.promptPassword) {
 			return
-		case <-renew:
-			if a == 1 {
-				log.Printf("renew")
-			}
-			continue
-		case <-time.After(timeout):
-			err = fmt.Errorf("read reply timeout")
-			return
+		} else if strings.Contains(reply, s.moreString) {
+			// 处理一屏幕显示不完情况，需要输入空格
+			s.consoleIn.Write([]byte(" "))
 		}
 	}
 
@@ -290,14 +234,26 @@ func (s *Session) IOHandle(w io.Writer, r, e io.Reader) {
 func (s *Session) Close() error {
 	return s.rawSession.Close()
 }
-func (s *Session) Wait()  {
+func (s *Session) Wait() {
+	buf := make([]byte, 64*1024)
+	out := make(chan string, 1024)
+	s.out = out
+	result := ""
 	for {
-		n, err := s.b.Read(s.buf)
+		n, err := s.consoleOut.Read(buf)
 		if err != nil {
-				s.b.Write(s.buf[:n])
-				return
+			out <- result
+			s.readErr <- err
+			//todo err handle
+			return
 
 		}
-		s.b.Write(s.buf[:n])
+		result = result + string(buf[:n])
+		select {
+		case out <- result:
+			result = ""
+		default:
+		}
+
 	}
 }
