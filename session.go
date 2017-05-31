@@ -52,6 +52,7 @@ func newConsoleSession() *Session {
 	s.prompt = make(map[string]string)
 	s.prompt[LoginKey] = "login:"
 	s.prompt[PasswordKey] = "password:"
+	s.moreString=MORE_STRING
 	s.runFlag = make(chan bool, 1)
 	s.SetHostname("")
 	return s
@@ -73,6 +74,7 @@ func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err erro
 	if err != nil {
 		return
 	}
+
 	if pType == PromptPassword {
 		err = ErrNeedPassword
 		return
@@ -81,6 +83,7 @@ func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err erro
 	if err != nil {
 		return
 	}
+
 	return s.readReply(timeout, false)
 }
 func (s *Session) login(username, password string) error {
@@ -137,9 +140,7 @@ func (s *Session) Enable(password string) error {
 	if pType == PromptStd {
 		s.consoleIn.Write([]byte("enable\n"))
 		reply, err := s.readReply(time.Second, false)
-		log.Printf(reply)
 		if err != nil && err != ErrNeedPassword {
-			log.Printf(reply)
 			return fmt.Errorf("Cann't find password pormpt:" + err.Error())
 		}
 		if len(reply) >= len(s.prompt[EnableKey]) &&
@@ -165,6 +166,7 @@ func (s *Session) Enable(password string) error {
 	if !strings.Contains(reply, s.prompt[EnableKey]) {
 		return fmt.Errorf("Enable :" + reply)
 	}
+	log.Printf("enabled")
 	return nil
 }
 func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
@@ -225,17 +227,16 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool) (reply strin
 			case <-time.After(timeout):
 				log.Printf("read reply timeout")
 				return
-				/*			default:
-							log.Printf("break")
-							break readFor*/
 			}
 		}
 		reply = reply + lastPartOfReply
-		if strings.Contains(reply, s.moreString) {
+		if strings.Contains(lastPartOfReply, s.moreString) {
 			// 处理一屏幕显示不完情况，需要输入空格
 			s.consoleIn.Write([]byte(" "))
 		} else {
 			for _, p := range s.prompt {
+				if p==s.prompt[EnableKey]{
+				}
 				if strings.Contains(lastPartOfReply, p) {
 					return
 				}
