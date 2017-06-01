@@ -16,7 +16,6 @@ func TelnetDial(addr, username, password string, timeout time.Duration) (*Sessio
 	}
 	session := newConsoleSession()
 	session.rawSession = conn
-	session.moreString = MORE_STRING
 	session.IOHandle(conn, conn, nil)
 	err = session.login(username, password)
 	if err != nil {

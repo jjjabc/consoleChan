@@ -63,7 +63,6 @@ func SshDial(addr, username, password string, timeout time.Duration) (*Session, 
 	}
 
 	sshSession := newConsoleSession()
-	sshSession.moreString = MORE_STRING
 	sshSession.rawSession = session
 	sshSession.IOHandle(w, r, e)
 	if err := session.Shell(); err != nil {

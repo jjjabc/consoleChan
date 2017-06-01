@@ -12,7 +12,6 @@ func SerialOpen(comName string, baudrate int, username, password string) (*Sessi
 	}
 	session := newConsoleSession()
 	session.rawSession = s
-	session.moreString = MORE_STRING
 	session.IOHandle(s, s, nil)
 	err = session.login(username, password)
 	if err != nil {

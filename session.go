@@ -21,7 +21,9 @@ const (
 	PromptUnknow
 )
 const (
-	MORE_STRING = "---MORE---"
+	MORE_STRING = "-MORE-"
+	More_STRING = "-More-"
+	more_STRING = "-more-"
 )
 const (
 	LoginKey    = "login"
@@ -39,7 +41,7 @@ type Session struct {
 	readErr    chan error
 	Stderr     <-chan string
 	hostname   string
-	moreString string
+	moreString map[string]string
 	consoleIn  io.Writer
 	consoleOut io.Reader
 	consoleErr io.Reader
@@ -50,9 +52,13 @@ type Session struct {
 func newConsoleSession() *Session {
 	s := &Session{}
 	s.prompt = make(map[string]string)
+	s.moreString = make(map[string]string)
 	s.prompt[LoginKey] = "login:"
 	s.prompt[PasswordKey] = "password:"
-	s.moreString=MORE_STRING
+	s.moreString[MORE_STRING] = MORE_STRING
+	s.moreString[More_STRING] = More_STRING
+	s.moreString[more_STRING] = more_STRING
+
 	s.runFlag = make(chan bool, 1)
 	s.SetHostname("")
 	return s
@@ -230,17 +236,10 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool) (reply strin
 			}
 		}
 		reply = reply + lastPartOfReply
-		if strings.Contains(lastPartOfReply, s.moreString) {
-			// 处理一屏幕显示不完情况，需要输入空格
+		if isContainsString(lastPartOfReply, s.moreString) {
 			s.consoleIn.Write([]byte(" "))
-		} else {
-			for _, p := range s.prompt {
-				if p==s.prompt[EnableKey]{
-				}
-				if strings.Contains(lastPartOfReply, p) {
-					return
-				}
-			}
+		} else if isContainsString(lastPartOfReply, s.prompt) {
+			return
 		}
 	}
 
@@ -281,4 +280,18 @@ func (s *Session) Wait() {
 
 		}
 	}()
+}
+func (s *Session) SetMoreStr(key, moreStr string) {
+	s.moreString[key] = moreStr
+}
+func (s *Session) SetPrompt(key, promptStr string) {
+	s.prompt[key] = promptStr
+}
+func isContainsString(s string, subStrMap map[string]string) bool {
+	for _, subStr := range subStrMap {
+		if strings.Contains(s, subStr) {
+			return true
+		}
+	}
+	return false
 }
