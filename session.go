@@ -14,6 +14,10 @@ var (
 )
 
 const (
+	CR = "\r\n"
+)
+
+const (
 	PromptStd = iota
 	PromptEnable
 	PromptPassword
@@ -53,8 +57,8 @@ func newConsoleSession() *Session {
 	s := &Session{}
 	s.prompt = make(map[string]string)
 	s.moreString = make(map[string]string)
-	s.prompt[LoginKey] = "login:"
-	s.prompt[PasswordKey] = "password:"
+	s.prompt[LoginKey] = "ogin:"
+	s.prompt[PasswordKey] = "assword:"
 	s.moreString[MORE_STRING] = MORE_STRING
 	s.moreString[More_STRING] = More_STRING
 	s.moreString[more_STRING] = more_STRING
@@ -85,7 +89,7 @@ func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err erro
 		err = ErrNeedPassword
 		return
 	}
-	_, err = s.consoleIn.Write([]byte(cmd + "\n"))
+	_, err = s.consoleIn.Write([]byte(cmd + CR))
 	if err != nil {
 		return
 	}
@@ -93,38 +97,32 @@ func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err erro
 	return s.readReply(timeout, false)
 }
 func (s *Session) login(username, password string) error {
-	if username != "" {
-		pType, err := s.findPrompt(false)
-		if err != nil {
-			return fmt.Errorf("console login error(enter username):" + err.Error())
-		}
-		if pType != PromptLogin {
-			return fmt.Errorf("console not ready for login(enter username):prompt is %d", pType)
-		}
-		_, err = s.consoleIn.Write([]byte(username + "\n"))
+	pType, err := s.findPrompt(false)
+	if err != nil {
+		return fmt.Errorf("console login error(enter username):" + err.Error())
+	}
+	if pType == PromptLogin {
+		_, err = s.consoleIn.Write([]byte(username + CR))
 		if err != nil {
 			return fmt.Errorf("console login error(enter username):%s", err.Error())
 		}
-	}
-	if password != "" {
-		pType, err := s.findPrompt(false)
+		pType, err = s.findPrompt(false)
 		if err != nil {
-			return fmt.Errorf("console login error(enter password):" + err.Error())
+			return fmt.Errorf("login err:" + err.Error())
 		}
-		if pType != PromptPassword {
-			return fmt.Errorf("console not ready for login(enter password):prompt is %d", pType)
-		}
-		s.consoleIn.Write([]byte(password + "\n"))
+	}
+	if pType == PromptPassword {
+		s.consoleIn.Write([]byte(password + CR))
 		if err != nil {
 			return fmt.Errorf("console login error(enter password):%s", err.Error())
 		}
 	}
-	pType, err := s.findPrompt(false)
+	pType, err = s.findPrompt(false)
 	if err != nil {
 		return fmt.Errorf("login err:" + err.Error())
 	}
-	if pType != PromptStd {
-		return fmt.Errorf("login err:maybe username or password wrong!")
+	if pType != PromptStd && pType != PromptEnable {
+		return fmt.Errorf("login err:PromptTypeId is %d,maybe username or password wrong!", pType)
 	}
 	return nil
 }
@@ -144,7 +142,7 @@ func (s *Session) Enable(password string) error {
 		return nil
 	}
 	if pType == PromptStd {
-		s.consoleIn.Write([]byte("enable\n"))
+		s.consoleIn.Write([]byte("enable" + CR))
 		reply, err := s.readReply(time.Second, false)
 		if err != nil && err != ErrNeedPassword {
 			return fmt.Errorf("Cann't find password pormpt:" + err.Error())
@@ -158,7 +156,7 @@ func (s *Session) Enable(password string) error {
 			return fmt.Errorf("Cann't find password pormpt!" + reply)
 		}
 	}
-	_, err = s.consoleIn.Write([]byte(password + "\n"))
+	_, err = s.consoleIn.Write([]byte(password + CR))
 	if err != nil {
 		return err
 	}
@@ -172,12 +170,11 @@ func (s *Session) Enable(password string) error {
 	if !strings.Contains(reply, s.prompt[EnableKey]) {
 		return fmt.Errorf("Enable :" + reply)
 	}
-	log.Printf("enabled")
 	return nil
 }
 func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 	if needCRFirst {
-		s.consoleIn.Write([]byte("\n"))
+		s.consoleIn.Write([]byte(CR))
 	}
 	reply, err := s.readReply(time.Second, false)
 	if err != nil {
@@ -203,7 +200,7 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 			}
 		}
 	}
-	replys := strings.SplitAfter(reply, "\n")
+	replys := strings.SplitAfter(reply, CR)
 	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\"", replys[len(replys)-1])
 }
 func (s *Session) readReply(timeout time.Duration, needPorpmt bool) (reply string, err error) {
