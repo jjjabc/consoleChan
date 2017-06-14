@@ -126,6 +126,9 @@ func (s *Session) login(username, password string) error {
 	}
 	return nil
 }
+func (s *Session)telnetJump(address,username,pwd string) error  {
+	panic("Need to implement")
+}
 func (s *Session) Enable(password string) error {
 	select {
 	case s.runFlag <- true:
