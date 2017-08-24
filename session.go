@@ -117,7 +117,12 @@ func (s *Session) login(username, password string) error {
 			return fmt.Errorf("console login error(enter password):%s", err.Error())
 		}
 	}
-	pType, err = s.findPrompt(false)
+	if pType == PromptStd || pType == PromptEnable {
+	// 如無密碼，需回車確認
+		pType, err = s.findPrompt(true)
+	}else{
+		pType, err = s.findPrompt(false)
+	}
 	if err != nil {
 		return fmt.Errorf("login err:" + err.Error())
 	}
