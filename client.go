@@ -1,9 +1,7 @@
 package consoleChan
 
-import (
-
-)
+import ()
 
 type Client interface {
-	Dial()(Session,error)
+	Dial() (Session, error)
 }

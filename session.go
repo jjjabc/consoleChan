@@ -118,9 +118,9 @@ func (s *Session) login(username, password string) error {
 		}
 	}
 	if pType == PromptStd || pType == PromptEnable {
-	// 如無密碼，需回車確認
+		// 如無密碼，需回車確認
 		pType, err = s.findPrompt(true)
-	}else{
+	} else {
 		pType, err = s.findPrompt(false)
 	}
 	if err != nil {
@@ -131,7 +131,7 @@ func (s *Session) login(username, password string) error {
 	}
 	return nil
 }
-func (s *Session)telnetJump(address,username,pwd string) error  {
+func (s *Session) telnetJump(address, username, pwd string) error {
 	panic("Need to implement")
 }
 func (s *Session) Enable(password string) error {
