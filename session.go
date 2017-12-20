@@ -11,6 +11,7 @@ import (
 
 var (
 	ErrNeedPassword = errors.New("Need to input password")
+	ErrTimeout      = errors.New("timeout")
 )
 
 const (
@@ -93,8 +94,7 @@ func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err erro
 	if err != nil {
 		return
 	}
-
-	return s.readReply(timeout, false)
+	return s.readReply(timeout, false, cmd)
 }
 func (s *Session) login(username, password string) error {
 	pType, err := s.findPrompt(false)
@@ -184,7 +184,17 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 	if needCRFirst {
 		s.consoleIn.Write([]byte(CR))
 	}
-	reply, err := s.readReply(time.Second, false)
+	var err error
+	var reply string
+	// 确保读取到最后一个提示符
+	for {
+		r, err := s.readReply(200*time.Millisecond, true)
+		if err == ErrTimeout {
+			err = nil
+			break
+		}
+		reply = reply + r
+	}
 	if err != nil {
 		return -1, fmt.Errorf("Finding prompt error:" + err.Error())
 	}
@@ -211,7 +221,7 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 	replys := strings.SplitAfter(reply, CR)
 	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\"", replys[len(replys)-1])
 }
-func (s *Session) readReply(timeout time.Duration, needPorpmt bool) (reply string, err error) {
+func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ...string) (reply string, err error) {
 	err = nil
 	for {
 		lastPartOfReply := ""
@@ -237,6 +247,7 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool) (reply strin
 				return
 			case <-time.After(timeout):
 				log.Printf("read reply timeout")
+				err = ErrTimeout
 				return
 			}
 		}
@@ -244,7 +255,11 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool) (reply strin
 		if isContainsString(lastPartOfReply, s.moreString) {
 			s.consoleIn.Write([]byte(" "))
 		} else if isContainsString(lastPartOfReply, s.prompt) {
-			return
+			if len(startWith) == 0 {
+				return
+			} else if strings.Contains(reply, startWith[0]) {
+				return
+			}
 		}
 	}
 
