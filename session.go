@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"strings"
 	"time"
 )
@@ -74,6 +73,10 @@ func (s *Session) SetHostname(hostname string) {
 	s.prompt[EnableKey] = s.hostname + "#"
 }
 func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err error) {
+	if s.rawSession == nil {
+		err = fmt.Errorf("session not connected")
+		return
+	}
 	select {
 	case s.runFlag <- true:
 		defer func() { <-s.runFlag }()
@@ -135,6 +138,9 @@ func (s *Session) telnetJump(address, username, pwd string) error {
 	panic("Need to implement")
 }
 func (s *Session) Enable(password string) error {
+	if s.rawSession == nil {
+		return fmt.Errorf("session not connected")
+	}
 	select {
 	case s.runFlag <- true:
 		defer func() { <-s.runFlag }()
@@ -246,7 +252,6 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ..
 				}
 				return
 			case <-time.After(timeout):
-				log.Printf("read reply timeout")
 				err = ErrTimeout
 				return
 			}
@@ -274,7 +279,10 @@ func (s *Session) IOHandle(w io.Writer, r, e io.Reader) {
 	s.Wait()
 }
 func (s *Session) Close() error {
-	return s.rawSession.Close()
+	if s.rawSession != nil {
+		return s.rawSession.Close()
+	}
+	return nil
 }
 func (s *Session) Wait() {
 	buf := make([]byte, 64*1024)
