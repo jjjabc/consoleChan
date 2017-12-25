@@ -200,6 +200,9 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 				err = nil
 				break
 			}
+			if err != nil {
+				return -1, err
+			}
 			reply = reply + r
 		}
 		if err != nil {
@@ -226,12 +229,15 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 			}
 		}
 	}
+	if reply==""{
+		return -1,fmt.Errorf("设备无回应")
+	}
 	replys := strings.SplitAfter(reply, CR)
 	var prompt = ""
 	if len(replys) > 0 {
 		prompt = replys[len(replys)-1]
 	}
-	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\"", prompt)
+	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\":%s", prompt, reply)
 }
 func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ...string) (reply string, err error) {
 	err = nil
@@ -240,11 +246,19 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ..
 	readFor:
 		for {
 			select {
-			case str := <-s.out:
+			case str,ok := <-s.out:
 				lastPartOfReply = lastPartOfReply + str
+				if !ok {
+					reply = reply + lastPartOfReply
+					return reply, fmt.Errorf("链接已关闭")
+				}
 				for {
 					select {
-					case str := <-s.out:
+					case str, ok := <-s.out:
+						if !ok {
+							reply = reply + lastPartOfReply
+							return reply, fmt.Errorf("链接已关闭")
+						}
 						lastPartOfReply = lastPartOfReply + str
 					default:
 						break readFor
@@ -255,6 +269,9 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ..
 				case s := <-s.out:
 					reply = reply + s
 				default:
+				}
+				if err == io.EOF {
+					err = fmt.Errorf("远程设备关闭链接:%s", err.Error())
 				}
 				return
 			case <-time.After(timeout):
@@ -293,6 +310,7 @@ func (s *Session) Close() error {
 func (s *Session) Wait() {
 	buf := make([]byte, 64*1024)
 	out := make(chan string, 1024)
+	s.readErr = make(chan error, 1)
 	s.out = out
 	result := ""
 	go func() {
@@ -303,6 +321,7 @@ func (s *Session) Wait() {
 				out <- result
 				s.readErr <- err
 				//todo err handle
+				close(out)
 				return
 
 			}

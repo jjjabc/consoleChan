@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+type sshSession struct {
+	client *ssh.Client
+	*ssh.Session
+}
+
+func newSshSession(c *ssh.Client) (*sshSession, error) {
+	sesson, err := c.NewSession()
+	if err != nil {
+		return nil, err
+	}
+	return &sshSession{client: c, Session: sesson}, nil
+}
+func (s *sshSession) Close() error {
+	s.client.Close()
+
+	err := s.Session.Close()
+	if err != nil {
+		return err
+	}
+	return s.client.Close()
+}
 func saveHostPublicKey(hostname string, remote net.Addr, key ssh.PublicKey) error {
 	fmt.Printf("publicKey:\n%x\n", key.Marshal())
 	return nil
@@ -18,7 +39,7 @@ func SshDial(addr, username, password string, timeout time.Duration) (*Session, 
 	// To authenticate with the remote server you must pass at least one
 	// implementation of AuthMethod via the Auth field in ClientConfig,
 	// and provide a HostKeyCallback.
-	config := &ssh.ClientConfig{
+	config := ssh.ClientConfig{
 		User: username,
 		Auth: []ssh.AuthMethod{
 			ssh.Password(password),
@@ -26,14 +47,14 @@ func SshDial(addr, username, password string, timeout time.Duration) (*Session, 
 		HostKeyCallback: saveHostPublicKey,
 		Timeout:         timeout,
 	}
-	client, err := ssh.Dial("tcp", addr, config)
+	client, err := ssh.Dial("tcp", addr, &config)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to dial: ", err)
 	}
 
 	// Each ClientConn can support multiple interactive sessions,
 	// represented by a Session.
-	session, err := client.NewSession()
+	session, err := newSshSession(client)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to create session: ", err)
 	}
@@ -45,7 +66,7 @@ func SshDial(addr, username, password string, timeout time.Duration) (*Session, 
 		ssh.TTY_OP_OSPEED: 14400, // output speed = 14.4kbaud
 	}
 	// Request pseudo terminal
-	if err := session.RequestPty("vt100", 40, 80, modes); err != nil {
+	if err := session.RequestPty("xterm", 40, 80, modes); err != nil {
 		return nil, fmt.Errorf("request for pseudo terminal failed: ", err)
 	}
 
@@ -69,6 +90,6 @@ func SshDial(addr, username, password string, timeout time.Duration) (*Session, 
 		log.Fatal(err)
 	}
 
-	go session.Wait()
+	//go session.Wait()
 	return sshSession, nil
 }
