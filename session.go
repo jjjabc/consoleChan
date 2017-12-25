@@ -146,6 +146,7 @@ func (s *Session) Enable(password string) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("%d", pType)
 	if pType == PromptEnable {
 		return nil
 	}
@@ -186,40 +187,46 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 	}
 	var err error
 	var reply string
-	// 确保读取到最后一个提示符
-	for {
-		r, err := s.readReply(200*time.Millisecond, true)
-		if err == ErrTimeout {
-			err = nil
-			break
+	for retryCount := 0; retryCount < 5; retryCount++ {
+		// 确保读取到最后一个提示符
+		for {
+			r, err := s.readReply(200*time.Millisecond, true)
+			if err == ErrTimeout {
+				err = nil
+				break
+			}
+			reply = reply + r
 		}
-		reply = reply + r
-	}
-	if err != nil {
-		return -1, fmt.Errorf("Finding prompt error:" + err.Error())
-	}
-	for k, p := range s.prompt {
-		if len(reply) >= len(p) {
-			if strings.Compare(reply[len(reply)-len(p):], p) == 0 {
-				switch k {
-				case StandKey:
-					return PromptStd, nil
-				case EnableKey:
-					return PromptEnable, nil
-				case PasswordKey:
-					return PromptPassword, nil
-				case LoginKey:
-					return PromptLogin, nil
-				default:
-					return PromptUnknow, nil
+		if err != nil {
+			return -1, fmt.Errorf("Finding prompt error:" + err.Error())
+		}
+		for k, p := range s.prompt {
+			if len(reply) >= len(p) {
+				if strings.Compare(reply[len(reply)-len(p):], p) == 0 {
+					switch k {
+					case StandKey:
+						return PromptStd, nil
+					case EnableKey:
+						return PromptEnable, nil
+					case PasswordKey:
+						return PromptPassword, nil
+					case LoginKey:
+						return PromptLogin, nil
+					default:
+						return PromptUnknow, nil
+
+					}
 
 				}
-
 			}
 		}
 	}
 	replys := strings.SplitAfter(reply, CR)
-	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\"", replys[len(replys)-1])
+	var prompt = ""
+	if len(replys) > 0 {
+		prompt = replys[len(replys)-1]
+	}
+	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\"", prompt)
 }
 func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ...string) (reply string, err error) {
 	err = nil
