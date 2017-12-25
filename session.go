@@ -152,7 +152,6 @@ func (s *Session) Enable(password string) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("%d", pType)
 	if pType == PromptEnable {
 		return nil
 	}
