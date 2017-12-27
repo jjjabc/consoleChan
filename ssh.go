@@ -47,9 +47,17 @@ func SshDial(addr, username, password string, timeout time.Duration) (*Session, 
 		HostKeyCallback: saveHostPublicKey,
 		Timeout:         timeout,
 	}
-	client, err := ssh.Dial("tcp", addr, &config)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to dial: ", err)
+	var client *ssh.Client
+	var err error
+	for retry := 0; ; retry++ {
+		client, err = ssh.Dial("tcp", addr, &config)
+		if err == nil {
+			break
+		}
+		if retry>2{
+			return nil, fmt.Errorf("Failed to dial: ", err)
+		}
+		time.Sleep(3*time.Second*time.Duration(retry+1))
 	}
 
 	// Each ClientConn can support multiple interactive sessions,

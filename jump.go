@@ -21,7 +21,7 @@ func JumpDial(jumpHostAddr, jumpHostUsername, jumpHostPassword, jumpType, target
 	if err != nil {
 		return nil, err
 	}
-	err = session.telnetJump(targetAddr, targetUsername, targetPassword)
+	err = session.telnetJump(targetAddr, targetUsername, targetPassword, timeout)
 	if err != nil {
 		return nil, err
 	}

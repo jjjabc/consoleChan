@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"time"
+	"bytes"
 )
 
 var (
@@ -34,6 +36,9 @@ const (
 	PasswordKey = "pwd"
 	EnableKey   = "enable"
 	StandKey    = "std"
+)
+const (
+	JumpDone = "done"
 )
 
 type PromptType int
@@ -88,8 +93,8 @@ func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err erro
 	if err != nil {
 		return
 	}
-
-	if pType == PromptPassword {
+	log.Printf("%d", pType)
+	if pType == PromptPassword || pType == PromptLogin {
 		err = ErrNeedPassword
 		return
 	}
@@ -97,10 +102,25 @@ func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err erro
 	if err != nil {
 		return
 	}
-	return s.readReply(timeout, false, cmd)
+	reply, err = s.readReply(timeout, false, cmd)
+	buf := bytes.Buffer{}
+	cFlag := false
+	for _, c := range reply {
+		if c == 13 {
+			cFlag = true
+			continue
+		}
+		if cFlag {
+			buf.Write([]byte{13})
+			cFlag = false
+		}
+		buf.Write([]byte{byte(c)})
+	}
+	reply = buf.String()
+	return
 }
 func (s *Session) login(username, password string) error {
-	pType, err := s.findPrompt(false)
+	pType, err := s.findPrompt(true)
 	if err != nil {
 		return fmt.Errorf("console login error(enter username):" + err.Error())
 	}
@@ -120,12 +140,13 @@ func (s *Session) login(username, password string) error {
 			return fmt.Errorf("console login error(enter password):%s", err.Error())
 		}
 	}
-	if pType == PromptStd || pType == PromptEnable {
-		// 如無密碼，需回車確認
-		pType, err = s.findPrompt(true)
-	} else {
-		pType, err = s.findPrompt(false)
-	}
+	pType, err = s.findPrompt(true)
+	/*	if pType == PromptStd || pType == PromptEnable {
+			// 如無密碼，需回車確認
+			pType, err = s.findPrompt(true)
+		} else {
+			pType, err = s.findPrompt(false)
+		}*/
 	if err != nil {
 		return fmt.Errorf("login err:" + err.Error())
 	}
@@ -134,8 +155,20 @@ func (s *Session) login(username, password string) error {
 	}
 	return nil
 }
-func (s *Session) telnetJump(address, username, pwd string) error {
-	panic("Need to implement")
+func (s *Session) telnetJump(address, username, pwd string, timeout time.Duration) error {
+	addr := strings.Split(address, ":")
+	if len(addr) != 2 {
+		fmt.Errorf("地址格式错误")
+	}
+	reply, err := s.Cmd("telnet "+addr[0]+" "+addr[1], timeout)
+	if err != nil {
+		return fmt.Errorf("进行跳转登录失败：%s", err.Error())
+	}
+	if !strings.Contains(reply, JumpDone) {
+		return fmt.Errorf("跳转登录失败：%s", reply)
+	}
+	log.Printf(reply)
+	return s.login(username, pwd)
 }
 func (s *Session) Enable(password string) error {
 	if s.rawSession == nil {
@@ -186,6 +219,9 @@ func (s *Session) Enable(password string) error {
 	}
 	return nil
 }
+func (s *Session) GetReply(time time.Duration) (string, error) {
+	return s.readReply(time, false)
+}
 func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 	if needCRFirst {
 		s.consoleIn.Write([]byte(CR))
@@ -229,8 +265,8 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 			}
 		}
 	}
-	if reply==""{
-		return -1,fmt.Errorf("设备无回应")
+	if reply == "" {
+		return -1, fmt.Errorf("设备无回应")
 	}
 	replys := strings.SplitAfter(reply, CR)
 	var prompt = ""
@@ -246,7 +282,7 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ..
 	readFor:
 		for {
 			select {
-			case str,ok := <-s.out:
+			case str, ok := <-s.out:
 				lastPartOfReply = lastPartOfReply + str
 				if !ok {
 					reply = reply + lastPartOfReply
