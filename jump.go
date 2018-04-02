@@ -19,7 +19,7 @@ func JumpDial(jumpHostAddr, jumpHostUsername, jumpHostPassword, jumpType, target
 		return nil, fmt.Errorf("\"%s\" protocol isn't supported.We only support \"telnet\",\"ssh\"")
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("connection(type:%s,address:%s) error:%s", jumpType, jumpHostAddr, err.Error())
 	}
 	err = session.telnetJump(targetAddr, targetUsername, targetPassword, timeout)
 	if err != nil {
