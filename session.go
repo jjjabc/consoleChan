@@ -1,13 +1,13 @@
 package consoleChan
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"strings"
 	"time"
-	"bytes"
 )
 
 var (
@@ -93,7 +93,6 @@ func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err erro
 	if err != nil {
 		return
 	}
-	log.Printf("%d", pType)
 	if pType == PromptPassword || pType == PromptLogin {
 		err = ErrNeedPassword
 		return
@@ -286,14 +285,14 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ..
 				lastPartOfReply = lastPartOfReply + str
 				if !ok {
 					reply = reply + lastPartOfReply
-					return reply, fmt.Errorf("链接已关闭")
+					return reply, fmt.Errorf("连接被关闭")
 				}
 				for {
 					select {
 					case str, ok := <-s.out:
 						if !ok {
 							reply = reply + lastPartOfReply
-							return reply, fmt.Errorf("链接已关闭")
+							return reply, fmt.Errorf("连接被关闭")
 						}
 						lastPartOfReply = lastPartOfReply + str
 					default:
@@ -302,8 +301,11 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ..
 				}
 			case err = <-s.readErr:
 				select {
-				case s := <-s.out:
+				case s, ok := <-s.out:
 					reply = reply + s
+					if !ok {
+						err = fmt.Errorf("连接被关闭")
+					}
 				default:
 				}
 				if err == io.EOF {
@@ -316,12 +318,12 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ..
 			}
 		}
 		reply = reply + lastPartOfReply
-		if isContainsString(lastPartOfReply, s.moreString) {
+		if isLastString(lastPartOfReply, s.moreString) {
 			s.consoleIn.Write([]byte(" "))
-		} else if isContainsString(lastPartOfReply, s.prompt) {
+		} else if isLastString(lastPartOfReply, s.prompt) {
 			if len(startWith) == 0 {
 				return
-			} else if strings.Contains(reply, startWith[0]) {
+			} else if isBeginString(reply, startWith[0]) {
 				return
 			}
 		}
@@ -383,4 +385,15 @@ func isContainsString(s string, subStrMap map[string]string) bool {
 		}
 	}
 	return false
+}
+func isLastString(s string, subStrMap map[string]string) bool {
+	for _, subStr := range subStrMap {
+		if len(s) >= len(subStr) && s[len(s)-len(subStr):] == subStr {
+			return true
+		}
+	}
+	return false
+}
+func isBeginString(s string, sub string) bool {
+	return len(s) >= len(sub) && s[:len(sub)] == sub
 }
