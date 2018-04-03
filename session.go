@@ -184,10 +184,10 @@ func (s *Session) Enable(password string) error {
 	if err != nil {
 		return err
 	}
-	if pType == PromptEnable {
+/*	if pType == PromptEnable {
 		return nil
 	}
-	if pType == PromptStd {
+	if pType == PromptStd*/ {
 		s.consoleIn.Write([]byte("enable" + CR))
 		reply, err := s.readReply(time.Second, false)
 		if err != nil && err != ErrNeedPassword {
