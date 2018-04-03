@@ -170,6 +170,7 @@ func (s *Session) telnetJump(address, username, pwd string, timeout time.Duratio
 	return s.login(username, pwd)
 }
 func (s *Session) Enable(password string) error {
+	var err error
 	if s.rawSession == nil {
 		return fmt.Errorf("session not connected")
 	}
@@ -180,14 +181,14 @@ func (s *Session) Enable(password string) error {
 		return fmt.Errorf("console isn't ready")
 	}
 	s.readReply(10*time.Millisecond, false)
-	pType, err := s.findPrompt(true)
-	if err != nil {
-		return err
-	}
-/*	if pType == PromptEnable {
-		return nil
-	}
-	if pType == PromptStd*/ {
+	/*	pType, err := s.findPrompt(true)
+		if err != nil {
+			return err
+
+		if pType == PromptEnable {
+			return nil
+		}
+		if pType == PromptStd*/ {
 		s.consoleIn.Write([]byte("enable" + CR))
 		reply, err := s.readReply(time.Second, false)
 		if err != nil && err != ErrNeedPassword {
