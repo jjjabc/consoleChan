@@ -188,7 +188,7 @@ func (s *Session) Enable(password string) error {
 		if pType == PromptEnable {
 			return nil
 		}
-		if pType == PromptStd*/ {
+		if pType == PromptStd*/{
 		s.consoleIn.Write([]byte("enable" + CR))
 		reply, err := s.readReply(time.Second, false)
 		if err != nil && err != ErrNeedPassword {
@@ -251,6 +251,9 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 					case StandKey:
 						return PromptStd, nil
 					case EnableKey:
+						if len(reply) == len(p) || reply[len(reply)-len(p)-1:] == " "+p {
+							continue
+						}
 						return PromptEnable, nil
 					case PasswordKey:
 						return PromptPassword, nil
@@ -388,8 +391,13 @@ func isContainsString(s string, subStrMap map[string]string) bool {
 	return false
 }
 func isLastString(s string, subStrMap map[string]string) bool {
-	for _, subStr := range subStrMap {
+	for k, subStr := range subStrMap {
 		if len(s) >= len(subStr) && s[len(s)-len(subStr):] == subStr {
+			if k == EnableKey {
+				if len(s) == len(subStr) || s[len(s)-len(subStr)-1:] == " "+subStr {
+					continue
+				}
+			}
 			return true
 		}
 	}
