@@ -325,11 +325,12 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ..
 		if isLastString(lastPartOfReply, s.moreString) {
 			s.consoleIn.Write([]byte(" "))
 		} else if isLastString(lastPartOfReply, s.prompt) {
-			if len(startWith) == 0 {
-				return
-			} else if isBeginString(reply, startWith[0]) {
-				return
-			}
+			return
+			/*			if len(startWith) == 0 {
+							return
+						} else if isBeginString(reply, startWith[0]) {
+							return
+						}*/
 		}
 	}
 
@@ -360,6 +361,7 @@ func (s *Session) Wait() {
 			n, err := s.consoleOut.Read(buf)
 			result = result + string(buf[:n])
 			if err != nil {
+				log.Printf("consoleOut close:" + err.Error())
 				out <- result
 				s.readErr <- err
 				//todo err handle
