@@ -350,6 +350,19 @@ func (s *Session) Close() error {
 	}
 	return nil
 }
+func (s *Session) IsSessionOK() (isOk bool) {
+	if s.rawSession != nil {
+		defer func() {
+			if recover() != nil {
+				isOk = false
+				return
+			}
+		}()
+		s.out <- "" // panic if ch is closed
+		return true
+	}
+	return false
+}
 func (s *Session) Wait() {
 	buf := make([]byte, 64*1024)
 	out := make(chan string, 1024)
@@ -366,6 +379,7 @@ func (s *Session) Wait() {
 				s.readErr <- err
 				//todo err handle
 				close(out)
+				s.Close()
 				return
 
 			}
