@@ -20,7 +20,7 @@ const (
 )
 
 const (
-	PromptStd = iota
+	PromptStd      = iota
 	PromptEnable
 	PromptPassword
 	PromptLogin
@@ -42,6 +42,7 @@ const (
 )
 
 type PromptType int
+var PromptWait =200*time.Millisecond
 
 type Session struct {
 	runFlag    chan bool
@@ -232,6 +233,7 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 		// 确保读取到最后一个提示符
 		for {
 			r, err := s.readReply(200*time.Millisecond, true)
+			reply = reply + r
 			if err == ErrTimeout {
 				err = nil
 				break
@@ -239,7 +241,6 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 			if err != nil {
 				return -1, err
 			}
-			reply = reply + r
 		}
 		if err != nil {
 			return -1, fmt.Errorf("Finding prompt error:" + err.Error())
@@ -321,10 +322,31 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ..
 				return
 			}
 		}
+	checkPrompt:
 		reply = reply + lastPartOfReply
 		if isLastString(lastPartOfReply, s.moreString) {
 			s.consoleIn.Write([]byte(" "))
 		} else if isLastString(lastPartOfReply, s.prompt) {
+			//遇到类似提示符符号，继续等待500ms如再无输出才判断命令执行完毕
+			select {
+			case str, _ := <-s.out:
+				lastPartOfReply = lastPartOfReply + str
+				// 如存还存在输出跳回字串检查处
+				goto checkPrompt
+			case err = <-s.readErr:
+				select {
+				case s, ok := <-s.out:
+					reply = reply + s
+					if !ok {
+						err = fmt.Errorf("连接被关闭")
+					}
+				default:
+				}
+				if err == io.EOF {
+					err = fmt.Errorf("远程设备关闭链接:%s", err.Error())
+				}
+			case <-time.After(PromptWait):
+			}
 			return
 			/*			if len(startWith) == 0 {
 							return
@@ -410,6 +432,10 @@ func isLastString(s string, subStrMap map[string]string) bool {
 	for k, subStr := range subStrMap {
 		if len(s) >= len(subStr) && s[len(s)-len(subStr):] == subStr {
 			if k == EnableKey {
+				if len(s) == len(subStr) || s[len(s)-len(subStr)-1:] == " "+subStr {
+					continue
+				}
+			} else if k == StandKey {
 				if len(s) == len(subStr) || s[len(s)-len(subStr)-1:] == " "+subStr {
 					continue
 				}
