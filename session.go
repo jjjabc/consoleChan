@@ -105,6 +105,7 @@ func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err erro
 	reply, err = s.readReply(timeout, false, cmd)
 	buf := bytes.Buffer{}
 	cFlag := false
+	// 解决多个/r后接/n问题，如/r/r/r/n过滤为/r/n
 	for _, c := range reply {
 		if c == 13 {
 			cFlag = true
@@ -331,7 +332,7 @@ func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ..
 			select {
 			case str, _ := <-s.out:
 				lastPartOfReply = lastPartOfReply + str
-				// 如存还存在输出跳回字串检查处
+				// 如果还存在输出跳回字串检查处
 				goto checkPrompt
 			case err = <-s.readErr:
 				select {
@@ -429,17 +430,17 @@ func isContainsString(s string, subStrMap map[string]string) bool {
 	return false
 }
 func isLastString(s string, subStrMap map[string]string) bool {
-	for k, subStr := range subStrMap {
+	for _, subStr := range subStrMap {
 		if len(s) >= len(subStr) && s[len(s)-len(subStr):] == subStr {
-			if k == EnableKey {
-				if len(s) == len(subStr) || s[len(s)-len(subStr)-1:] == " "+subStr {
-					continue
-				}
-			} else if k == StandKey {
-				if len(s) == len(subStr) || s[len(s)-len(subStr)-1:] == " "+subStr {
-					continue
-				}
-			}
+			//无需判断“ #这中情况”
+			/*			if k == EnableKey||k == StandKey {
+							if len(s) == len(subStr){
+								return true
+							}
+							if len(s) == len(subStr) || s[len(s)-len(subStr)-1:] == " "+subStr {
+								continue
+							}
+						}*/
 			return true
 		}
 	}
