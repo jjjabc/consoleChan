@@ -7,7 +7,7 @@ import (
 
 // JumpDial for connect to and login target addr through jump host. Jump host to target just only use telnet protocol
 // jumpType only "ssh" or "telnet"
-func JumpDial(jumpHostAddr, jumpHostUsername, jumpHostPassword, jumpType, targetAddr, targetUsername, targetPassword string, timeout time.Duration) (*Session, error) {
+func JumpDial(sshCmd, sshDone, telnetCmd, telnetDone, jumpHostAddr, jumpHostUsername, jumpHostPassword, jumpType, targetAddr, targetUsername, targetPassword, targetType string, timeout time.Duration) (*Session, error) {
 	var session *Session
 	var err error
 	switch jumpType {
@@ -21,7 +21,8 @@ func JumpDial(jumpHostAddr, jumpHostUsername, jumpHostPassword, jumpType, target
 	if err != nil {
 		return nil, fmt.Errorf("connection(type:%s,address:%s) error:%s", jumpType, jumpHostAddr, err.Error())
 	}
-	err = session.telnetJump(targetAddr, targetUsername, targetPassword, timeout)
+	/*err = session.telnetJump(targetAddr, targetUsername, targetPassword, timeout)*/
+	err = session.jump(sshCmd, sshDone, telnetCmd, telnetDone, targetAddr, targetUsername, targetPassword, targetType, timeout)
 	if err != nil {
 		return nil, err
 	}

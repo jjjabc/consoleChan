@@ -8,6 +8,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"regexp"
 )
 
 var (
@@ -42,7 +43,8 @@ const (
 )
 
 type PromptType int
-var PromptWait =200*time.Millisecond
+
+var PromptWait = 200 * time.Millisecond
 
 type Session struct {
 	runFlag    chan bool
@@ -77,6 +79,49 @@ func (s *Session) SetHostname(hostname string) {
 	s.hostname = hostname
 	s.prompt[StandKey] = s.hostname + ">"
 	s.prompt[EnableKey] = s.hostname + "#"
+}
+func (s *Session) Exec(cmd string, timeout time.Duration) (reply string, err error) {
+	if s.rawSession == nil {
+		err = fmt.Errorf("session not connected")
+		return
+	}
+	select {
+	case s.runFlag <- true:
+		defer func() { <-s.runFlag }()
+	default:
+		return "", fmt.Errorf("console isn't ready")
+	}
+	_, err = s.consoleIn.Write([]byte(cmd + CR))
+	if err != nil {
+		return
+	}
+	lastPartOfReply := ""
+	for {
+		select {
+		case str, ok := <-s.out:
+			lastPartOfReply = lastPartOfReply + str
+			if !ok {
+				reply = reply + lastPartOfReply
+				return reply, fmt.Errorf("连接被关闭")
+			}
+		case err = <-s.readErr:
+			select {
+			case s, ok := <-s.out:
+				reply = reply + s
+				if !ok {
+					err = fmt.Errorf("连接被关闭")
+				}
+			default:
+			}
+			if err == io.EOF {
+				err = fmt.Errorf("远程设备关闭链接:%s", err.Error())
+			}
+			return
+		case <-time.After(timeout):
+			reply = reply + lastPartOfReply
+			return
+		}
+	}
 }
 func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err error) {
 	if s.rawSession == nil {
@@ -167,6 +212,64 @@ func (s *Session) telnetJump(address, username, pwd string, timeout time.Duratio
 	}
 	if !strings.Contains(reply, JumpDone) {
 		return fmt.Errorf("跳转登录失败：%s", reply)
+	}
+	log.Printf(reply)
+	return s.login(username, pwd)
+}
+
+const (
+	pwdFlagStr  = "{pwd}"
+	ipFlagStr   = "{ip}"
+	portFlagStr = "{port}"
+	userFlagStr = "{username}"
+)
+
+func (s *Session) jump(sshCmd, sshDone, telnetCmd, telnetDone string, address, username, pwd, connectType string, timeout time.Duration) error {
+	addr := strings.Split(address, ":")
+	if len(addr) != 2 {
+		fmt.Errorf("地址格式错误")
+	}
+	var cmd, done string
+	switch connectType {
+	case "ssh":
+		log.Println(sshCmd)
+		cmd = sshCmd
+		done = sshDone
+	case "telnet":
+		cmd = telnetCmd
+		done = telnetDone
+	default:
+		return fmt.Errorf("不支持的连接方式(支持ssh或telnet):%s", connectType)
+	}
+	log.Println(cmd)
+	cmd = strings.Replace(cmd, userFlagStr, username, -1)
+	cmd = strings.Replace(cmd, pwdFlagStr, pwd, -1)
+	cmd = strings.Replace(cmd, ipFlagStr, addr[0], -1)
+	cmd = strings.Replace(cmd, portFlagStr, addr[1], -1)
+	reply, err := s.Exec(cmd, PromptWait)
+	if err != nil {
+		return err
+	}
+	//log.Printf("%s\r\n%s",cmd,reply)
+	if regexp.MustCompile(`(?i)(yes|y).*[\\/].*(no|n)`).Match([]byte(reply)) {
+		reply, err = s.Exec("yes", PromptWait)
+		if err != nil {
+			return err
+		}
+		//log.Printf(reply)
+	}
+	if strings.Contains(reply, "assword:") {
+		reply, err = s.Exec(pwd, PromptWait*2)
+		if err != nil {
+			return err
+		}
+		//log.Printf("%s\r\n%s",pwd,reply)
+	}
+	if reply == "" {
+		return fmt.Errorf("设备无响应")
+	}
+	if !strings.Contains(reply, done) {
+		return fmt.Errorf("跳转登录失败(期待%s):%s", done, reply)
 	}
 	log.Printf(reply)
 	return s.login(username, pwd)
@@ -281,6 +384,9 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\":%s", prompt, reply)
 }
 func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ...string) (reply string, err error) {
+	if timeout == 0 {
+		return "", nil
+	}
 	err = nil
 	for {
 		lastPartOfReply := ""

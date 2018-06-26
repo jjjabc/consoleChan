@@ -46,6 +46,13 @@ func SshDial(addr, username, password string, timeout time.Duration) (*Session, 
 		},
 		HostKeyCallback: saveHostPublicKey,
 		Timeout:         timeout,
+		Config: ssh.Config{
+			Ciphers: []string{
+				"aes128-ctr", "aes192-ctr", "aes256-ctr",
+				"aes128-gcm@openssh.com",
+				"arcfour256", "arcfour128", "aes128-cbc", "3des-cbc", "aes192-cbc", "aes256-cbc",
+			},
+		},
 	}
 	var client *ssh.Client
 	var err error
@@ -54,10 +61,10 @@ func SshDial(addr, username, password string, timeout time.Duration) (*Session, 
 		if err == nil {
 			break
 		}
-		if retry>2{
+		if retry > 2 {
 			return nil, fmt.Errorf("Failed to dial: ", err)
 		}
-		time.Sleep(3*time.Second*time.Duration(retry+1))
+		time.Sleep(3 * time.Second * time.Duration(retry+1))
 	}
 
 	// Each ClientConn can support multiple interactive sessions,
