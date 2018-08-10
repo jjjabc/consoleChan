@@ -177,6 +177,14 @@ func (s *Session) login(username, password string) error {
 		}
 		pType, err = s.findPrompt(false)
 		if err != nil {
+			time.Sleep(5 * time.Second)
+			tempErr := err.Error()
+			pType, err = s.findPrompt(false)
+			if err != nil {
+				err = errors.New(tempErr)
+			}
+		}
+		if err != nil {
 			return fmt.Errorf("login err:" + err.Error())
 		}
 	}
@@ -193,6 +201,14 @@ func (s *Session) login(username, password string) error {
 		} else {
 			pType, err = s.findPrompt(false)
 		}*/
+	if err != nil {
+		time.Sleep(5 * time.Second)
+		tempErr := err.Error()
+		pType, err = s.findPrompt(false)
+		if err != nil {
+			err = errors.New(tempErr)
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("login err:" + err.Error())
 	}
@@ -246,7 +262,7 @@ func (s *Session) jump(sshCmd, sshDone, telnetCmd, telnetDone string, address, u
 	cmd = strings.Replace(cmd, pwdFlagStr, pwd, -1)
 	cmd = strings.Replace(cmd, ipFlagStr, addr[0], -1)
 	cmd = strings.Replace(cmd, portFlagStr, addr[1], -1)
-	reply, err := s.Exec(cmd, PromptWait)
+	reply, err := s.Exec(cmd, PromptWait*15)
 	if err != nil {
 		return err
 	}
@@ -259,7 +275,7 @@ func (s *Session) jump(sshCmd, sshDone, telnetCmd, telnetDone string, address, u
 		//log.Printf(reply)
 	}
 	if strings.Contains(reply, "assword:") {
-		reply, err = s.Exec(pwd, PromptWait*2)
+		reply, err = s.Exec(pwd, PromptWait*15)
 		if err != nil {
 			return err
 		}
@@ -268,10 +284,18 @@ func (s *Session) jump(sshCmd, sshDone, telnetCmd, telnetDone string, address, u
 	if reply == "" {
 		return fmt.Errorf("设备无响应")
 	}
-	if !strings.Contains(reply, done) {
-		return fmt.Errorf("跳转登录失败(期待%s):%s", done, reply)
+	findDone := false
+	dones := strings.Split(done, "|")
+	for _, doneStr := range dones {
+		if strings.Contains(reply, doneStr) {
+			findDone = true
+			break
+		}
 	}
 	log.Printf(reply)
+	if !findDone {
+		return fmt.Errorf("跳转登录失败(期待%s):%s", done, reply)
+	}
 	return s.login(username, pwd)
 }
 func (s *Session) Enable(password string) error {
@@ -295,7 +319,7 @@ func (s *Session) Enable(password string) error {
 		}
 		if pType == PromptStd*/{
 		s.consoleIn.Write([]byte("enable" + CR))
-		reply, err := s.readReply(time.Second, false)
+		reply, err := s.readReply(10*time.Second, false)
 		if err != nil && err != ErrNeedPassword {
 			return fmt.Errorf("Cann't find password pormpt:" + err.Error())
 		}
