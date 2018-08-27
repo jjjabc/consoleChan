@@ -373,9 +373,10 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 		if err != nil {
 			return -1, fmt.Errorf("Finding prompt error:" + err.Error())
 		}
+		replyTrim:=strings.TrimSpace(reply)
 		for k, p := range s.prompt {
-			if len(reply) >= len(p) {
-				if strings.Compare(reply[len(reply)-len(p):], p) == 0 {
+			if len(replyTrim) >= len(p) {
+				if strings.Compare(replyTrim[len(replyTrim)-len(p):], p) == 0 {
 					switch k {
 					case StandKey:
 						return PromptStd, nil
