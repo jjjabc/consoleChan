@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"regexp"
 	"strings"
 	"time"
-	"regexp"
 )
 
 var (
@@ -21,7 +21,7 @@ const (
 )
 
 const (
-	PromptStd      = iota
+	PromptStd = iota
 	PromptEnable
 	PromptPassword
 	PromptLogin
@@ -123,7 +123,7 @@ func (s *Session) Exec(cmd string, timeout time.Duration) (reply string, err err
 		}
 	}
 }
-func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err error) {
+func (s *Session) Cmd(cmd string, timeout time.Duration, isFindPromptFirst ...bool) (reply string, err error) {
 	if s.rawSession == nil {
 		err = fmt.Errorf("session not connected")
 		return
@@ -135,13 +135,24 @@ func (s *Session) Cmd(cmd string, timeout time.Duration) (reply string, err erro
 		return "", fmt.Errorf("console isn't ready")
 	}
 	err = nil
-	pType, err := s.findPrompt(true)
-	if err != nil {
-		return
-	}
-	if pType == PromptPassword || pType == PromptLogin {
-		err = ErrNeedPassword
-		return
+	if len(isFindPromptFirst) == 0 || isFindPromptFirst[0] {
+		pType := PromptType(0)
+		pType, err = s.findPrompt(true)
+		if err != nil {
+			return
+		}
+		if pType == PromptPassword || pType == PromptLogin {
+			switch pType {
+			case PromptPassword:
+				reply = `password prompt(from MPatrol)
+			`
+			case PromptLogin:
+				reply = `login prompt(from MPatrol)
+			`
+			}
+			err = ErrNeedPassword
+			//return
+		}
 	}
 	_, err = s.consoleIn.Write([]byte(cmd + CR))
 	if err != nil {
@@ -298,7 +309,11 @@ func (s *Session) jump(sshCmd, sshDone, telnetCmd, telnetDone string, address, u
 	}
 	return s.login(username, pwd)
 }
-func (s *Session) Enable(password string) error {
+func (s *Session) Enable(password string, timeout ...time.Duration) error {
+	replyTimeout := 10 * time.Second
+	if len(timeout) >= 1 {
+		replyTimeout = timeout[0]
+	}
 	var err error
 	if s.rawSession == nil {
 		return fmt.Errorf("session not connected")
@@ -309,17 +324,18 @@ func (s *Session) Enable(password string) error {
 	default:
 		return fmt.Errorf("console isn't ready")
 	}
+	// 等待时间已解决登录子系统时无回应
 	s.readReply(10*time.Millisecond, false)
 	/*	pType, err := s.findPrompt(true)
 		if err != nil {
 			return err
-
+		}
 		if pType == PromptEnable {
 			return nil
 		}
 		if pType == PromptStd*/{
 		s.consoleIn.Write([]byte("enable" + CR))
-		reply, err := s.readReply(10*time.Second, false)
+		reply, err := s.readReply(replyTimeout, false)
 		if err != nil && err != ErrNeedPassword {
 			return fmt.Errorf("Cann't find password pormpt:" + err.Error())
 		}
@@ -336,7 +352,7 @@ func (s *Session) Enable(password string) error {
 	if err != nil {
 		return err
 	}
-	reply, err := s.readReply(time.Second, true)
+	reply, err := s.readReply(replyTimeout, true)
 	if err != nil {
 		if err == ErrNeedPassword {
 			return fmt.Errorf("Wrong password")
@@ -373,7 +389,7 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 		if err != nil {
 			return -1, fmt.Errorf("Finding prompt error:" + err.Error())
 		}
-		replyTrim:=strings.TrimSpace(reply)
+		replyTrim := strings.TrimSpace(reply)
 		for k, p := range s.prompt {
 			if len(replyTrim) >= len(p) {
 				if strings.Compare(replyTrim[len(replyTrim)-len(p):], p) == 0 {
@@ -381,9 +397,9 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 					case StandKey:
 						return PromptStd, nil
 					case EnableKey:
-						if len(reply) == len(p) || reply[len(reply)-len(p)-1:] == " "+p {
+						/*if len(replyTrim) == len(p) || replyTrim[len(replyTrim)-len(p)-1:] == " "+p {
 							continue
-						}
+						}*/
 						return PromptEnable, nil
 					case PasswordKey:
 						return PromptPassword, nil
@@ -406,7 +422,7 @@ func (s *Session) findPrompt(needCRFirst bool) (PromptType, error) {
 	if len(replys) > 0 {
 		prompt = replys[len(replys)-1]
 	}
-	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\":%s", prompt, reply)
+	return -1, fmt.Errorf("Finding prompt error:prompt is incorrect,prompt is \"%s\":%s\r\n", prompt, reply)
 }
 func (s *Session) readReply(timeout time.Duration, needPorpmt bool, startWith ...string) (reply string, err error) {
 	if timeout == 0 {
@@ -561,19 +577,24 @@ func isContainsString(s string, subStrMap map[string]string) bool {
 	return false
 }
 func isLastString(s string, subStrMap map[string]string) bool {
+	s = strings.TrimSpace(s)
 	for _, subStr := range subStrMap {
 		if len(s) >= len(subStr) && s[len(s)-len(subStr):] == subStr {
 			//无需判断“ #这中情况”
 			/*			if k == EnableKey||k == StandKey {
-							if len(s) == len(subStr){
-								return true
-							}
-							if len(s) == len(subStr) || s[len(s)-len(subStr)-1:] == " "+subStr {
-								continue
-							}
-						}*/
+						if len(s) == len(subStr){
+							return true
+						}
+						if len(s) == len(subStr) || s[len(s)-len(subStr)-1:] == " "+subStr {
+							continue
+						}
+					}*/
 			return true
 		}
+		/*		sTrim:=strings.TrimSpace(s)
+				if strings.Compare(s[len(s)-len(subStr):], subStr) == 0 {
+
+				}*/
 	}
 	return false
 }
