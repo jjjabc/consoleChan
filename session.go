@@ -9,6 +9,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"golang.org/x/text/transform"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"io/ioutil"
 )
 
 var (
@@ -21,7 +24,7 @@ const (
 )
 
 const (
-	PromptStd = iota
+	PromptStd      = iota
 	PromptEnable
 	PromptPassword
 	PromptLogin
@@ -159,21 +162,23 @@ func (s *Session) Cmd(cmd string, timeout time.Duration, isFindPromptFirst ...bo
 		return
 	}
 	reply, err = s.readReply(timeout, false, cmd)
-	buf := bytes.Buffer{}
-	cFlag := false
-	// 解决多个/r后接/n问题，如/r/r/r/n过滤为/r/n
-	for _, c := range reply {
-		if c == 13 {
-			cFlag = true
-			continue
+	/*	buf := bytes.Buffer{}
+		cFlag := false
+		// 解决多个/r后接/n问题，如/r/r/r/n过滤为/r/n
+		log.Println(reply)
+		for _, c := range reply {
+			if c == 13 {
+				cFlag = true
+				continue
+			}
+			if cFlag {
+				buf.Write([]byte{13})
+				cFlag = false
+			}
+			buf.Write([]byte{byte(c)})
 		}
-		if cFlag {
-			buf.Write([]byte{13})
-			cFlag = false
-		}
-		buf.Write([]byte{byte(c)})
-	}
-	reply = buf.String()
+		reply = buf.String()
+		log.Println(reply)*/
 	return
 }
 func (s *Session) login(username, password string) error {
@@ -509,8 +514,8 @@ func (s *Session) IOHandle(w io.Writer, r, e io.Reader) {
 	go func() {
 		//todo output stderr
 	}()
-	s.consoleIn = w
-	s.consoleOut = r
+	s.consoleIn = transform.NewWriter(w, simplifiedchinese.GBK.NewEncoder())
+	s.consoleOut = transform.NewReader(r, simplifiedchinese.GBK.NewDecoder())
 	s.consoleErr = e
 	s.Wait()
 }
@@ -600,4 +605,12 @@ func isLastString(s string, subStrMap map[string]string) bool {
 }
 func isBeginString(s string, sub string) bool {
 	return len(s) >= len(sub) && s[:len(sub)] == sub
+}
+func GbkToUtf8(s []byte) ([]byte, error) {
+	reader := transform.NewReader(bytes.NewReader(s), simplifiedchinese.GBK.NewDecoder())
+	d, e := ioutil.ReadAll(reader)
+	if e != nil {
+		return nil, e
+	}
+	return d, nil
 }
